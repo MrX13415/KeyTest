@@ -25,7 +25,7 @@ namespace KeyTest
     {
 
         public int KeyCount { get; private set; }
-        
+
 
         public MainWindow()
         {
@@ -38,24 +38,31 @@ namespace KeyTest
             KeyboardHock.KeyEvent += KeyEvent;
         }
 
+        bool was0 = false;
+
         private void HandleKey(KeyInfo info)
         {
             Run txt = null;
             Run meta = null;
+            Run space = null;
+
             if (info.Position < 0)
             {
                 info.Position = Output.Inlines.Count;
 
                 txt = new Run(info.KeyString);
                 meta = new Run("");
-                Output.Inlines.Add(txt);          // text
-                Output.Inlines.Add(meta);         // meta info
-                Output.Inlines.Add(new Run("  ")); // spaceing
+                space = new Run("  ");
+
+                Output.Inlines.Add(txt);      // text
+                Output.Inlines.Add(meta);     /// meta info
+                Output.Inlines.Add(space);    // spaceing
             }
             else
             {
                 txt = (Run)Output.Inlines.ElementAt(info.Position);
                 meta = (Run)txt.NextInline;
+                space = (Run)meta.NextInline;
             }
 
             meta.Text = $"{info.Timer.ElapsedMilliseconds}ms";
@@ -63,7 +70,7 @@ namespace KeyTest
 
             if (info.KeyDown)
             {
-                if (info.Event.IsSysKey) txt.Foreground = new SolidColorBrush(Color.FromRgb(40, 120, 240)); 
+                if (info.Event.IsSysKey) txt.Foreground = new SolidColorBrush(Color.FromRgb(40, 120, 240));
                 else txt.Foreground = new SolidColorBrush(Color.FromRgb(240, 40, 40));
                 meta.Foreground = new SolidColorBrush(Color.FromRgb(100, 100, 100));
             }
@@ -71,7 +78,34 @@ namespace KeyTest
             {
                 txt.Foreground = new SolidColorBrush(Color.FromRgb(100, 100, 100));
                 meta.Foreground = new SolidColorBrush(Color.FromRgb(180, 180, 180));
+                was0 = true;
             }
+
+            CountText.Content = $"{was0} {KeyInfo.Count}";
+
+            if (KeyInfo.HasMultiple)
+            {
+                var td = new TextDecoration(TextDecorationLocation.Underline, new Pen(Brushes.Red, 2), 2, TextDecorationUnit.FontRecommended, TextDecorationUnit.FontRecommended);
+
+
+                txt.TextDecorations.Add(td);
+                meta.TextDecorations.Add(td);
+
+                if (!info.IsLast) space.TextDecorations.Add(td);
+                //if (space != null)
+                //{
+                //    if (info.EventIndex == 0) space.Background = Brushes.Blue;
+                //    if (info.EventIndex == 1) space.Background = Brushes.Red;
+                //    if (info.EventIndex > 1) space.Background = Brushes.Green;
+                //}
+
+                was0 = false;
+            }
+            else
+            {
+
+            }
+
 
             OutScroll.ScrollToEnd();
         }
@@ -80,13 +114,7 @@ namespace KeyTest
         {
             if (CenterInfo.IsVisible) CenterInfo.Visibility = Visibility.Hidden;
 
-            var last = KeyInfo.Set(e);
-            if (last.KeyUp) HandleKey(last);
-
-            foreach (var info in KeyInfo.EventList.Values)
-            {
-                HandleKey(info);
-            }
+            KeyInfo.HandleEvent(e, (info) => HandleKey(info));
 
             KeyCount++;
             CountInfo.Content = KeyCount;
@@ -98,6 +126,11 @@ namespace KeyTest
             Output.Text = "";
             CenterInfo.Visibility = Visibility.Visible;
             KeyCount = 0;
+
+            // Reset focus, so <space> won't trigger it.
+            var scope = FocusManager.GetFocusScope(ClearButton); // elem is the UIElement to unfocus
+            FocusManager.SetFocusedElement(scope, null); // remove logical focus
+            Keyboard.ClearFocus(); // remove keyboard focus
         }
     }
 
@@ -107,12 +140,14 @@ namespace KeyTest
 
         public KeyHockEventArgs Event { get; private set; }
         public Stopwatch Timer { get; } = new Stopwatch();
+        public int EventIndex { get; }
         public int Position { get; set; } = -1;
 
 
-        private KeyInfo(KeyHockEventArgs @event)
+        private KeyInfo(KeyHockEventArgs @event, int index)
         {
             Event = @event;
+            EventIndex = index;
         }
 
         public int VirtualKey => Event.VirtualKey;
@@ -121,27 +156,30 @@ namespace KeyTest
         public bool IsUnknow => Event.IsUnknow;
 
         public string KeyString => Event.Key.ToString();
+        public bool IsLast => EventIndex == EventList.Count - 1;
 
+        public static int Count => EventList.Count;
+        public static bool HasMultiple => Count > 1;
 
-        public static KeyInfo Set(KeyHockEventArgs @event)
+        public static KeyInfo HandleEvent(KeyHockEventArgs @event, Action<KeyInfo> action)
         {
             if (!EventList.TryGetValue(@event.VirtualKey, out var info))
             {
-                info = new KeyInfo(@event);
+                info = new KeyInfo(@event, EventList.Count);
                 if (info.KeyDown) EventList.Add(@event.VirtualKey, info);
             }
             else
             {
                 info.Event = @event;
             }
-           
+
             if (info.KeyDown) info.Timer.Start();
-            if (info.KeyUp)
-            {
-                info.Timer.Stop();
-                EventList.Remove(info.VirtualKey);
-            }
-            
+            if (info.KeyUp) info.Timer.Stop();
+
+            foreach (var keyinfo in EventList.Values) action(keyinfo);
+
+            if (info.KeyUp) EventList.Remove(info.VirtualKey);
+
             return info;
         }
 
